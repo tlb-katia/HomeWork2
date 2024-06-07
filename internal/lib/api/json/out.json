@@ -1,0 +1,34 @@
+[
+	{
+		"company": "hoofs",
+		"valid_operations_count": 69,
+		"balance": 2740,
+		"invalid_operations": [
+			"jzdatnNhV",
+			"EghgioA",
+			"income",
+			"outcome",
+			"outcome"
+		]
+	},
+	{
+		"company": "horns",
+		"valid_operations_count": 50,
+		"balance": -1466,
+		"invalid_operations": [
+			"income",
+			"outcome",
+			"lbXGZZCQe",
+			"outcome",
+			"income"
+		]
+	},
+	{
+		"company": "tails",
+		"valid_operations_count": 4,
+		"balance": -438,
+		"invalid_operations": [
+			"income"
+		]
+	}
+]
