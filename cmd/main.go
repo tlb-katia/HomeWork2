@@ -37,4 +37,5 @@ func main() {
 	if err != nil {
 		log.Fatal("failed to write file: %v", err)
 	}
+
 }

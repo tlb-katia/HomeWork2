@@ -2,9 +2,9 @@ package calculated_balance
 
 import (
 	"HomeWork2/internal/lib/api/billing"
-	"fmt"
-	"reflect"
+	"errors"
 	"sort"
+	"strconv"
 )
 
 type CompanyBalance struct {
@@ -14,109 +14,62 @@ type CompanyBalance struct {
 	InvalidOperations []interface{} `json:"invalid_operations,omitempty"`
 }
 
-// CountBalance вычисляет баланс каждой компании на основе списка Root.
-// Возвращает список структур CompanyBalance.
+var companies = make(map[string]CompanyBalance)
+
 func CountBalance(roots []billing.Root) []CompanyBalance {
-	companies := make(map[string]CompanyBalance) // name = struct
-	for _, root := range roots {
-		t := reflect.TypeOf(root)
-		for i := 0; i < t.NumField(); i++ {
-			field := t.Field(i)
-			if field.Name == "Value" {
-				err := sumBalanceValues(&companies, root.Company, &root.Operation.Value)
-				if err == nil {
-					countValidOperations(&companies, root.Company)
-				}
-			}
+	for _, r := range roots {
+		if r.Operation.Value.Int != nil {
+			doSum(r.Operation.Value.Int, r.Company.Name)
 		}
-		distributeFields(reflect.ValueOf(root), &companies, root.Company)
+
+		assignValidInvalidOperations(r)
 	}
-	ret := make([]CompanyBalance, 0, len(companies))
-	recordAndSortFinalData(&ret, &companies)
-	return ret
+
+	return recordAndSortFinalData()
 }
 
-// checkValue проверяет наличие значения true в мапе Value и возвращает это значение как int.
-// Если значение не найдено, возвращает ошибку.
-func checkValue(m *map[interface{}]bool) (int, error) {
-	for value, v := range *m {
-		if v == true {
-			return value.(int), nil
-		}
+func doSum(data interface{}, name string) CompanyBalance {
+	companyStruct, ok := companies[name]
+	if !ok {
+		companyStruct = CompanyBalance{Company: name, Balance: 0}
 	}
-	return 0, fmt.Errorf("value not found in company map")
+	if num, err := checkIntValue(data); err == nil {
+		companyStruct.Balance += num
+		companies[name] = companyStruct
+	}
+	return companies[name]
 }
 
-// sumBalanceValues суммирует значения в мапе с данными Values и добавляет их к балансу компании.
-// Если компания не существует в мапе, создает новую запись.
-func sumBalanceValues(companies *map[string]CompanyBalance, key string, m *map[interface{}]bool) error {
-	valInt, err := checkValue(m)
-	if err != nil {
-		return fmt.Errorf("value not found in company map ", err)
+func checkIntValue(data interface{}) (int, error) {
+	switch data.(type) {
+	case int:
+		return data.(int), nil
+	case float64:
+		return int(data.(float64)), nil
+	case string:
+		return strconv.Atoi(data.(string))
 	}
-	companyStruct, exists := (*companies)[key]
+	return 0, errors.New("invalid type")
+}
 
+func assignValidInvalidOperations(r billing.Root) {
+	_, exists := companies[r.Company.Name]
 	if !exists {
-		companyStruct = CompanyBalance{Company: key, Balance: 0}
+		companies[r.Company.Name] = CompanyBalance{Company: r.Company.Name}
 	}
-	companyStruct.Balance += valInt
-	(*companies)[key] = companyStruct
-
-	return nil
+	compStruct := companies[r.Company.Name]
+	compStruct.InvalidOperations = r.Operation.InvalidOperations
+	compStruct.ValidOperations = r.Operation.ValidOperations
+	companies[r.Company.Name] = compStruct
 }
 
-// addInvalidOperations добавляет невалидные операции в список невалиндных операций компании.
-// Если компания не существует в мапе, создает новую запись.
-func addInvalidOperations(companies *map[string]CompanyBalance, key string, value interface{}) {
-	companyStruct, exists := (*companies)[key]
-
-	if !exists {
-		companyStruct = CompanyBalance{Company: key, Balance: 0, InvalidOperations: make([]interface{}, 0)}
+func recordAndSortFinalData() []CompanyBalance {
+	var ret []CompanyBalance
+	for _, company := range companies {
+		ret = append(ret, company)
 	}
-	companyStruct.InvalidOperations = append(companyStruct.InvalidOperations, value)
-	(*companies)[key] = companyStruct
-
-}
-
-// countValidOperations сумирует валидные операции
-// Если компания не существует в мапе, создает новую запись.
-func countValidOperations(companies *map[string]CompanyBalance, company string) {
-	companyBalance, exists := (*companies)[company]
-	if !exists {
-		companyBalance = CompanyBalance{Company: company, Balance: 0, InvalidOperations: make([]interface{}, 0)}
-	}
-	companyBalance.ValidOperations += 1
-	(*companies)[company] = companyBalance
-}
-
-// distributeFields распределяет значения мап в структуре v на соответствующие списки в map[string]CompanyBalance.
-func distributeFields(v reflect.Value, companies *map[string]CompanyBalance, company string) {
-	for i := 0; i < v.NumField(); i++ {
-		field := v.Field(i)
-
-		if field.Kind() == reflect.Map {
-			for _, key := range field.MapKeys() {
-				value := field.MapIndex(key)
-				if value.Bool() == true {
-					countValidOperations(companies, company)
-				} else {
-					if keyValue := key.Interface(); keyValue != nil && keyValue != "" {
-						addInvalidOperations(companies, company, keyValue)
-					}
-				}
-			}
-		}
-	}
-}
-
-// recordAndSortFinalData записывает данные из map[string]CompanyBalance
-// в переданный список CompanyBalance и сортирует его по названию компании.
-func recordAndSortFinalData(ret *[]CompanyBalance, companies *map[string]CompanyBalance) {
-	for _, company := range *companies {
-		*ret = append(*ret, company)
-	}
-
-	sort.SliceStable(*ret, func(i, j int) bool {
-		return (*ret)[i].Company < (*ret)[j].Company
+	sort.SliceStable(ret, func(i, j int) bool {
+		return (ret)[i].Company < (ret)[j].Company
 	})
+	return ret
 }

@@ -2,252 +2,240 @@ package billing
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
-	"reflect"
 	"strconv"
 	"time"
+	"unicode"
 )
 
-type Entity interface {
-	SetType(interface{}, bool)
-	SetValue(interface{}, bool)
-	SetCreatedAt(interface{}, bool)
-	SetID(interface{}, bool)
-}
-
 type Operation struct {
-	Type      map[interface{}]bool `json:"type,omitempty"`
-	Value     map[interface{}]bool `json:"value,omitempty"`
-	ID        map[interface{}]bool `json:"id,omitempty"`
-	CreatedAt map[interface{}]bool `json:"created_at,omitempty"`
+	Type              CustomType      `json:"type,omitempty"`
+	Value             CustomValue     `json:"value,omitempty"`
+	ID                CustomID        `json:"id,omitempty"`
+	CreatedAt         CustomCreatedAt `json:"created_at,omitempty"`
+	InvalidOperations []interface{}
+	ValidOperations   int
 }
 
 type Root struct {
-	Company   string               `json:"company"`
-	Operation *Operation           `json:"operation,omitempty"`
-	Type      map[interface{}]bool `json:"type,omitempty"`
-	Value     map[interface{}]bool `json:"value,omitempty"`
-	ID        map[interface{}]bool `json:"id,omitempty"`
-	CreatedAt map[interface{}]bool `json:"created_at,omitempty"`
+	Company   CustomName      `json:"company"`
+	Operation *Operation      `json:"operation,omitempty"`
+	Type      CustomType      `json:"type,omitempty"`
+	Value     CustomValue     `json:"value,omitempty"`
+	ID        CustomID        `json:"id,omitempty"`
+	CreatedAt CustomCreatedAt `json:"created_at,omitempty"`
 }
 
-type OperationType string
+var invalidOperations = make(map[string][]interface{}) // companyName : slice
+var validOperations = make(map[string]int)             // companyName : slice
+var Name string                                        //company name for the same root
+
+type CustomName struct {
+	Name string
+}
+type CustomValue struct {
+	Int interface{}
+}
+
+type CustomID struct {
+	String interface{}
+}
+
+type CustomCreatedAt struct {
+	CreatedAt interface{}
+}
+
+type CustomType struct {
+	Type interface{}
+}
 
 const (
-	Income  OperationType = "Income"
-	Outcome OperationType = "Outcome"
-	Plus    OperationType = "+"
-	Minus   OperationType = "-"
+	Income  = "income"
+	Outcome = "outcome"
+	Plus    = "+"
+	Minus   = "-"
 )
 
 // ValidOperationTypes holds all valid operation types
-var ValidOperationTypes = map[OperationType]bool{
+var ValidOperationTypes = map[string]bool{
 	Income:  true,
 	Outcome: true,
 	Plus:    true,
 	Minus:   true,
 }
 
-// UnmarshalJSON десериализует JSON-данные в структуру Root.
-// В случае некорректных данных возвращает ошибку.
 func (r *Root) UnmarshalJSON(data []byte) error {
-	var raw map[string]interface{}
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return fmt.Errorf("Root: invalid JSON: %w", err)
+	// Создаем временную структуру без метода UnmarshalJSON
+	temp := struct {
+		Company   CustomName      `json:"company"`
+		Operation *Operation      `json:"operation,omitempty"`
+		Type      CustomType      `json:"type,omitempty"`
+		Value     CustomValue     `json:"value,omitempty"`
+		ID        CustomID        `json:"id,omitempty"`
+		CreatedAt CustomCreatedAt `json:"created_at,omitempty"`
+	}{}
+
+	// Десериализуем данные в временную структуру
+	if err := json.Unmarshal(data, &temp); err != nil {
+		return err
 	}
 
-	if company, ok := raw["company"].(string); ok {
-		r.Company = company
-	} else {
-		return errors.New("invalid or missing company")
-	}
-	initializeMaps(r)
-
-	if op, ok := raw["operation"].(map[string]interface{}); ok {
-		parseEntity(r.Operation, &op)
-	}
-	parseEntity(r, &raw)
-
-	return validateOperation(r)
-}
-
-// initializeMaps инициализирует все мапы в структуре Root и вложенной структуре Operation, если они не были инициализированы ранее.
-// Если переданное значение r является nil, создается новая структура Root.
-func initializeMaps(r *Root) {
-	if r == nil {
-		r = &Root{}
-	}
-	initializeStructMaps(reflect.ValueOf(r).Elem())
+	// Копируем данные из временной структуры в оригинальную структуру
+	r.Company = temp.Company
+	r.Type = temp.Type
+	r.Value = temp.Value
+	r.ID = temp.ID
+	r.CreatedAt = temp.CreatedAt
 
 	if r.Operation == nil {
 		r.Operation = &Operation{}
 	}
-	initializeStructMaps(reflect.ValueOf(r.Operation).Elem())
+	r.Operation.ValidOperations = validOperations[Name]
+	r.Operation.InvalidOperations = invalidOperations[Name]
+
+	// Здесь вы можете добавить дополнительную логику по обработке InvalidOperations и ValidOperations
+	// Например, если вам нужно проверить корректность операции и т.д.
+
+	return ValidateOperation(r)
 }
 
-// initializeStructMaps инициализирует все мапы в структуре, представленной значением val.
-// Функция используется для рекурсивной инициализации мап во всех вложенных структурах.
-func initializeStructMaps(val reflect.Value) {
-	for i := 0; i < val.NumField(); i++ {
-		field := val.Field(i)
-		fieldType := field.Type()
+func (cv *CustomValue) UnmarshalJSON(data []byte) error {
+	if data[0] == '"' && data[len(data)-1] == '"' {
+		if _, err := dataParsing(data[1 : len(data)-1]); err == nil {
+			sumValidValues()
+			if err := json.Unmarshal(data[1:len(data)-1], &cv.Int); err != nil {
+				return fmt.Errorf("Failed to unmarshal custom value: %s", err)
+			}
+		}
+	} else if _, err := dataParsing(data); err == nil {
+		sumValidValues()
+		if err := json.Unmarshal(data, &cv.Int); err != nil {
+			return fmt.Errorf("Failed to unmarshal custom value: %s", err)
 
-		if field.Kind() == reflect.Map && field.IsNil() {
-			field.Set(reflect.MakeMap(fieldType))
 		}
 	}
+	return nil
 }
 
-// parseEntity анализирует данные из map, содержащих информацию о сущности,
-// и устанавливает соответствующие значения в переданном объекте Entity.
-// Если данные отсутствуют или имеют неправильный формат, используются значения по умолчанию.
-func parseEntity(entity Entity, data *map[string]interface{}) {
-	if t, ok := (*data)["type"].(string); ok {
-		parseType(&entity, t)
-	} else {
-		entity.SetType((*data)["type"], false)
-	}
-
-	if v, ok := (*data)["value"]; ok {
-		parseValue(&entity, v)
-	}
-
-	if t, ok := (*data)["created_at"]; ok {
-		parseCreatedAt(&entity, t)
-	}
-
-	if v, ok := (*data)["id"]; ok {
-		parseID(&entity, v)
-	}
-}
-
-// parseType парсит тип операции из строки и устанавливает его в объекте Entity.
-// Если тип операции недопустим, устанавливает значение по умолчанию.
-func parseType(entity *Entity, data string) {
-	operationType := OperationType(data)
-	if !ValidOperationTypes[operationType] {
-		(*entity).SetType(operationType, false)
-	} else {
-		(*entity).SetType(operationType, true)
-	}
-}
-
-// parseValue парсит тип операции из строки и устанавливает его в объекте Entity.
-// Если тип операции недопустим, устанавливает значение по умолчанию.
-func parseValue(entity *Entity, data interface{}) {
-	switch data.(type) {
-	case float64:
-		(*entity).SetValue(int(data.(float64)), true)
-	case string:
-		i, err := strconv.Atoi(data.(string))
-		if err == nil {
-			(*entity).SetValue(i, true)
-		} else {
-			(*entity).SetValue(i, false)
+func dataParsing(data []byte) (bool, error) {
+	for i := 0; i < len(data); i++ {
+		if i == 0 && data[i] == '-' {
+			continue
 		}
-	case int:
-		(*entity).SetValue(data, true)
-	default:
-		(*entity).SetValue(data, false)
+		if !unicode.IsDigit(rune(data[i])) {
+			collectInvalidValues(string(data))
+			return true, fmt.Errorf("Invalid custom value: %s", string(data))
+		}
 	}
+	return checkFloat(string(data)), nil
 }
 
-// parseCreatedAt парсит дату создания из интерфейса и устанавливает ее в объекте Entity.
-// Если дата некорректна, устанавливает значение по умолчанию.
-func parseCreatedAt(entity *Entity, data interface{}) {
-	createdAt, err := time.Parse(time.RFC3339, data.(string))
+func checkFloat(data string) bool {
+	if _, err := strconv.ParseFloat(data, 64); err != nil {
+		collectInvalidValues(data)
+		return false
+	}
+	return true
+}
+
+func (cid *CustomID) UnmarshalJSON(data []byte) error {
+	if data[0] == '"' && data[len(data)-1] == '"' {
+		sumValidValues()
+		if err := json.Unmarshal(data, &cid.String); err != nil {
+			return fmt.Errorf("Failed to unmarshal custom id: %s", err)
+		}
+	} else {
+		flag, err := dataParsing(data)
+		if err == nil && flag == false {
+			sumValidValues()
+			if err := json.Unmarshal(data, &cid.String); err != nil {
+				return fmt.Errorf("Failed to unmarshal custom value: %s", err)
+
+			}
+		} else if flag == true {
+			collectInvalidValues(string(data))
+		}
+	}
+
+	return nil
+}
+
+func (tc *CustomCreatedAt) UnmarshalJSON(data []byte) error {
+	_, err := time.Parse(time.RFC3339, string(data[1:len(data)-1]))
 	if err != nil {
-		(*entity).SetCreatedAt(data.(string), false)
+		collectInvalidValues(string(data))
 	} else {
-		(*entity).SetCreatedAt(createdAt, true)
+		sumValidValues()
+		if err := json.Unmarshal(data, &tc.CreatedAt); err != nil {
+			return fmt.Errorf("Failed to unmarshal custom time: %s", err)
+		}
 	}
+	return nil
 }
 
-// parseID парсит идентификатор из интерфейса и устанавливает его в объекте Entity.
-// Если идентификатор некорректен, устанавливает значение по умолчанию.
-func parseID(entity *Entity, data interface{}) {
-	switch data.(type) {
-	case string:
-		(*entity).SetID(data, true)
-	case int:
-		(*entity).SetID(data, true)
-	default:
-		(*entity).SetID(data, true)
+func (ct *CustomType) UnmarshalJSON(data []byte) error {
+	if !ValidOperationTypes[string(data[1:len(data)-1])] {
+		collectInvalidValues(string(data))
+	} else {
+		sumValidValues()
+		if err := json.Unmarshal(data, &ct.Type); err != nil {
+			return fmt.Errorf("Failed to unmarshal custom type: %s", err)
+		}
 	}
+	return nil
 }
 
-// validateOperation проверяет корректность операции и обновляет структуру Root соответствующим образом.
-// Если операция некорректна, возвращает ошибку.
-func validateOperation(root *Root) error {
+func (cn *CustomName) UnmarshalJSON(data []byte) error {
+	Name = string(data)
+	sumValidValues()
+	if err := json.Unmarshal(data, &cn.Name); err != nil {
+		return fmt.Errorf("failed to unmarshal name: %w", err)
+	}
+	return nil
+}
+
+func collectInvalidValues(data interface{}) {
+	_, exists := invalidOperations[Name]
+	if !exists {
+		invalidOperations[Name] = make([]interface{}, 0)
+	}
+	invalidOperations[Name] = append(invalidOperations[Name], data)
+}
+
+func sumValidValues() {
+	_, exists := validOperations[Name]
+	if !exists {
+		validOperations[Name] = 0
+	}
+	validOperations[Name]++
+}
+
+func ValidateOperation(root *Root) error {
 	var operation Operation
 
 	if root.Operation != nil {
 		operation = *root.Operation
 	}
+	//else {
+	//	root.Operation = &Operation{}
+	//}
 
-	for k, v := range root.Type {
-		if v == true {
-			operation.Type = root.Type
-		} else if k != nil {
-			operation.Type = root.Type
-		}
-	}
-	for k, v := range root.Value {
-		if v == true {
-			operation.Value = root.Value
-		} else if k != nil {
-			operation.Value = root.Value
-		}
+	if root.Type.Type != nil {
+		operation.Type.Type = root.Type.Type
 	}
 
-	for k, v := range root.CreatedAt {
-		if v == true {
-			operation.CreatedAt = root.CreatedAt
-		} else if k != nil {
-			operation.CreatedAt = root.CreatedAt
-		}
+	if root.Value.Int != nil {
+		operation.Value.Int = root.Value.Int
 	}
-	for k, v := range root.ID {
-		if v == true {
-			operation.ID = root.ID
-		} else if k != nil {
-			operation.ID = root.ID
-		}
+
+	if root.CreatedAt.CreatedAt != nil {
+		operation.CreatedAt.CreatedAt = root.CreatedAt.CreatedAt
+	}
+
+	if root.ID.String != nil {
+		operation.ID.String = root.ID.String
 	}
 
 	root.Operation = &operation
 	return nil
-}
-
-func (o *Operation) SetType(t interface{}, flag bool) {
-	o.Type[t] = flag
-}
-
-func (o *Operation) SetValue(v interface{}, flag bool) {
-	o.Value[v] = flag
-}
-
-func (o *Operation) SetCreatedAt(c interface{}, flag bool) {
-	o.CreatedAt[c] = flag
-}
-
-func (o *Operation) SetID(id interface{}, flag bool) {
-	o.ID[id] = flag
-}
-
-func (r *Root) SetType(t interface{}, flag bool) {
-	r.Type[t] = flag
-}
-
-func (r *Root) SetValue(v interface{}, flag bool) {
-	r.Value[v] = flag
-}
-
-func (r *Root) SetCreatedAt(c interface{}, flag bool) {
-	r.CreatedAt[c] = flag
-}
-
-func (r *Root) SetID(id interface{}, flag bool) {
-	r.ID[id] = flag
 }

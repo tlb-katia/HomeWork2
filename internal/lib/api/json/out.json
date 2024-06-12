@@ -1,26 +1,44 @@
 [
 	{
 		"company": "hoofs",
-		"valid_operations_count": 69,
-		"balance": 2740,
+		"valid_operations_count": 100,
+		"balance": 425,
 		"invalid_operations": [
-			"jzdatnNhV",
-			"EghgioA",
-			"income",
-			"outcome",
-			"outcome"
+			"\"jzdatnNhV\"",
+			"827",
+			"\"EghgioA\"",
+			"828",
+			"830",
+			"353.5033203336785",
+			"832",
+			"834",
+			"835",
+			"836",
+			"837",
+			"283.6804084585916",
+			"840",
+			"841",
+			"842",
+			"843",
+			"-86.61644059221477",
+			"845",
+			"846"
 		]
 	},
 	{
 		"company": "horns",
-		"valid_operations_count": 50,
-		"balance": -1466,
+		"valid_operations_count": 85,
+		"balance": -1688,
 		"invalid_operations": [
-			"income",
-			"outcome",
-			"lbXGZZCQe",
-			"outcome",
-			"income"
+			"\"IdBGFhjWa\"",
+			"829",
+			"\"ipfsRxkc\"",
+			"\"lbXGZZCQe\"",
+			"831",
+			"833",
+			"839",
+			"844",
+			"847"
 		]
 	},
 	{
@@ -28,7 +46,7 @@
 		"valid_operations_count": 4,
 		"balance": -438,
 		"invalid_operations": [
-			"income"
+			"838"
 		]
 	}
 ]
